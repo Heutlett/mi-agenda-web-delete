@@ -1,5 +1,6 @@
 "use client";
 
+import { AlertTriangle } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 
@@ -15,8 +16,10 @@ import {
   listAvailabilityBlocks,
 } from "@/lib/api/availability-blocks";
 import { ApiError } from "@/lib/api/client";
-import { type Employee, listEmployees } from "@/lib/api/employees";
+import { type Employee, getCurrentEmployee, listEmployees } from "@/lib/api/employees";
+import { listSchedules, type Schedule } from "@/lib/api/schedules";
 import { formatDateTime, toIntlLocale } from "@/lib/date";
+import { employeeHasActiveSchedule } from "@/lib/schedule-check";
 import { useSession } from "../session-context";
 import {
   type AvailabilityFormErrors,
@@ -26,18 +29,22 @@ import {
   validateAvailabilityForm,
 } from "./availability-form";
 
+// Unlike schedules and services, no permission gates this page: blocking
+// off one's own time is core to being an employee, so every authenticated
+// role reaches it (mi-agenda-api opens POST/DELETE /availability/blocks to
+// any employee, self-scoped, with no permission check at all).
 export default function AvailabilityPage() {
   const { role } = useSession();
-  const tc = useTranslations("Common");
 
-  if (role !== "admin") {
-    return <p className="text-muted-foreground text-sm">{tc("noAccess")}</p>;
-  }
-
-  return <AvailabilityManagement />;
+  return role === "admin" ? (
+    <AdminAvailabilityManagement />
+  ) : (
+    <OwnAvailabilityManagement />
+  );
 }
 
-function AvailabilityManagement() {
+/** An admin picks which employee's availability to view/edit, exactly as before. */
+function AdminAvailabilityManagement() {
   const t = useTranslations("Availability");
   const [employees, setEmployees] = useState<Employee[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -107,9 +114,46 @@ function AvailabilityManagement() {
   );
 }
 
+/** An employee manages only their own availability blocks — no picker, since there's nothing to pick between. */
+function OwnAvailabilityManagement() {
+  const t = useTranslations("Availability");
+  const [employeeId, setEmployeeId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    getCurrentEmployee()
+      .then((employee) => setEmployeeId(employee.id))
+      .catch((err: unknown) => {
+        setLoadError(
+          err instanceof ApiError ? err.message : t("loadErrorEmployees"),
+        );
+      });
+  }, [t]);
+
+  if (loadError) {
+    return <p className="text-destructive text-sm">{loadError}</p>;
+  }
+
+  if (!employeeId) {
+    return (
+      <div className="flex justify-center p-6">
+        <Spinner className="size-6" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex max-w-lg flex-col gap-6">
+      <h1 className="text-lg font-semibold">{t("title")}</h1>
+      <EmployeeAvailability employeeId={employeeId} />
+    </div>
+  );
+}
+
 function EmployeeAvailability({ employeeId }: { employeeId: string }) {
   const t = useTranslations("Availability");
   const [blocks, setBlocks] = useState<AvailabilityBlock[] | null>(null);
+  const [schedules, setSchedules] = useState<Schedule[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const reload = useCallback(() => {
@@ -126,6 +170,15 @@ function EmployeeAvailability({ employeeId }: { employeeId: string }) {
     reload();
   }, [reload]);
 
+  useEffect(() => {
+    listSchedules(employeeId)
+      .then(setSchedules)
+      .catch(() => {
+        // The "no schedule yet" hint below just won't show; the rest of
+        // the page still works.
+      });
+  }, [employeeId]);
+
   if (loadError) {
     return <p className="text-destructive text-sm">{loadError}</p>;
   }
@@ -138,9 +191,25 @@ function EmployeeAvailability({ employeeId }: { employeeId: string }) {
     );
   }
 
+  // A block only means anything as time carved out of an existing
+  // schedule — creating one against a schedule that doesn't exist yet is
+  // meaningless, so the create form is replaced with an explanation
+  // instead of letting it be filled out for nothing. Once schedules has
+  // loaded (not null) and truly has zero active rows.
+  const hasNoSchedule = schedules !== null && !employeeHasActiveSchedule(schedules);
+
   return (
     <>
-      <CreateAvailabilityBlockForm employeeId={employeeId} onCreated={reload} />
+      {hasNoSchedule ? (
+        <div className="border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40 flex items-start gap-2 rounded-lg border p-3">
+          <AlertTriangle className="text-amber-600 dark:text-amber-500 mt-0.5 size-4 shrink-0" />
+          <p className="text-amber-800 dark:text-amber-200 text-sm">
+            {t("addScheduleFirst")}
+          </p>
+        </div>
+      ) : (
+        <CreateAvailabilityBlockForm employeeId={employeeId} onCreated={reload} />
+      )}
       <AvailabilityBlockList blocks={blocks} onChanged={reload} />
     </>
   );

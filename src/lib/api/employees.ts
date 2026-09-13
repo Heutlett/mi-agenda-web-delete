@@ -5,7 +5,6 @@ export interface Employee {
   business_id: string;
   user_id: string;
   name: string;
-  status: "active" | "inactive";
   created_at: string;
   updated_at: string;
   permissions: string[];
@@ -46,7 +45,6 @@ export function getCurrentEmployee(): Promise<Employee> {
 
 export interface UpdateEmployeeParams {
   name?: string;
-  status?: "active" | "inactive";
   permissions?: string[];
 }
 
@@ -61,8 +59,13 @@ export function updateEmployee(
   });
 }
 
-/** DELETE /employees/{id} — deactivates the employee (sets status to inactive; does not delete the record). Requires the admin role. */
-export function deactivateEmployee(id: string): Promise<void> {
+/**
+ * DELETE /employees/{id} — permanent and one-way: there's no reversible
+ * active/inactive state, the employee just disappears from `listEmployees`
+ * and every booking/scheduling flow for good, and can never be edited again.
+ * Requires the admin role.
+ */
+export function deleteEmployee(id: string): Promise<void> {
   return authFetch<void>(`/employees/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });

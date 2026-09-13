@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  calendarRangeLabel,
   calendarUrl,
   parseDateParam,
-  parseOptionalDateParam,
   parseShowCancelledParam,
-  parseStatusParam,
   parseViewParam,
   weekDates,
 } from "./calendar";
@@ -18,19 +17,6 @@ describe("calendarUrl", () => {
     expect(
       calendarUrl({ employee: "e1", date: "2026-09-10", view: "day" }),
     ).toBe("/admin/appointments?view=day&date=2026-09-10&employee=e1");
-  });
-
-  it("includes list-mode filters", () => {
-    expect(
-      calendarUrl({
-        view: "list",
-        start: "2026-09-01",
-        end: "2026-09-30",
-        status: "CONFIRMED",
-      }),
-    ).toBe(
-      "/admin/appointments?view=list&start=2026-09-01&end=2026-09-30&status=CONFIRMED",
-    );
   });
 
   it("omits the cancelled param by default (cancelled appointments hidden)", () => {
@@ -60,31 +46,6 @@ describe("parseDateParam", () => {
   });
 });
 
-describe("parseOptionalDateParam", () => {
-  it("parses a valid date", () => {
-    expect(parseOptionalDateParam("2026-09-10")).toBe("2026-09-10");
-  });
-
-  it("returns undefined when missing or malformed", () => {
-    expect(parseOptionalDateParam(null)).toBeUndefined();
-    expect(parseOptionalDateParam("not-a-date")).toBeUndefined();
-  });
-});
-
-describe("parseStatusParam", () => {
-  it("parses a valid status", () => {
-    expect(parseStatusParam("CONFIRMED")).toBe("CONFIRMED");
-    expect(parseStatusParam("CANCELLED")).toBe("CANCELLED");
-    expect(parseStatusParam("COMPLETED")).toBe("COMPLETED");
-  });
-
-  it("returns undefined when missing or invalid", () => {
-    expect(parseStatusParam(null)).toBeUndefined();
-    expect(parseStatusParam("confirmed")).toBeUndefined();
-    expect(parseStatusParam("PENDING")).toBeUndefined();
-  });
-});
-
 describe("parseShowCancelledParam", () => {
   it("is false (hidden) when missing", () => {
     expect(parseShowCancelledParam(null)).toBe(false);
@@ -98,13 +59,13 @@ describe("parseShowCancelledParam", () => {
 });
 
 describe("parseViewParam", () => {
-  it("parses 'day' and 'list'", () => {
+  it("parses 'day'", () => {
     expect(parseViewParam("day")).toBe("day");
-    expect(parseViewParam("list")).toBe("list");
   });
 
   it("defaults to 'week' for anything else", () => {
     expect(parseViewParam(null)).toBe("week");
+    expect(parseViewParam("list")).toBe("week");
     expect(parseViewParam("month")).toBe("week");
   });
 });
@@ -158,5 +119,54 @@ describe("weekDates", () => {
       "2026-10-03",
       "2026-10-04",
     ]);
+  });
+});
+
+describe("calendarRangeLabel", () => {
+  it("shows a single month and year for a day view", () => {
+    expect(calendarRangeLabel(["2026-09-15"], "en-US")).toBe("September 2026");
+  });
+
+  it("shows a single month and year for a week that stays within one month", () => {
+    expect(
+      calendarRangeLabel(
+        ["2026-09-07", "2026-09-08", "2026-09-09", "2026-09-10", "2026-09-11", "2026-09-12", "2026-09-13"],
+        "en-US",
+      ),
+    ).toBe("September 2026");
+  });
+
+  it("shows both months, once the year, for a week spanning a month boundary within one year", () => {
+    expect(
+      calendarRangeLabel(
+        ["2026-09-28", "2026-09-29", "2026-09-30", "2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04"],
+        "en-US",
+      ),
+    ).toBe("September – October 2026");
+  });
+
+  it("shows the year on both sides for a week spanning a year boundary", () => {
+    expect(
+      calendarRangeLabel(
+        ["2026-12-28", "2026-12-29", "2026-12-30", "2026-12-31", "2027-01-01", "2027-01-02", "2027-01-03"],
+        "en-US",
+      ),
+    ).toBe("December 2026 – January 2027");
+  });
+
+  it("formats in Spanish for the es-CR locale, without the connector Intl would insert alongside a year", () => {
+    // Regression: asking Intl for month+long and year+numeric together
+    // produces "septiembre de 2026" in es-CR, which reads fine in a
+    // sentence but not as a standalone calendar heading.
+    expect(calendarRangeLabel(["2026-09-15"], "es-CR")).toBe("Septiembre 2026");
+  });
+
+  it("still shows the correct months for a Spanish range spanning a month boundary", () => {
+    expect(
+      calendarRangeLabel(
+        ["2026-09-28", "2026-09-29", "2026-09-30", "2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04"],
+        "es-CR",
+      ),
+    ).toBe("Septiembre – Octubre 2026");
   });
 });

@@ -9,6 +9,8 @@ import {
   History,
   ListChecks,
   type LucideIcon,
+  Repeat,
+  ScrollText,
   Users,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -19,7 +21,17 @@ import { hasPermission, useSession, type Session } from "./session-context";
 
 interface NavItem {
   href: string;
-  labelKey: "myCalendar" | "business" | "employees" | "services" | "schedules" | "availability" | "customers" | "history";
+  labelKey:
+    | "myCalendar"
+    | "business"
+    | "employees"
+    | "services"
+    | "schedules"
+    | "availability"
+    | "customers"
+    | "recurringAppointments"
+    | "history"
+    | "auditLog";
   icon: LucideIcon;
   /** Every nav item requires a session; this one additionally requires the admin role. */
   adminOnly?: boolean;
@@ -30,10 +42,12 @@ interface NavItem {
 }
 
 // Matches each module's own role/permission requirement in mi-agenda-api's
-// endpoints-reference.md. Business and appointments are visible to any
-// authenticated role (an employee's own view is scoped server-side);
-// customers additionally requires the view_customers permission; the rest
-// stay admin-only.
+// endpoints-reference.md. Business, appointments, and availability are
+// visible to any authenticated role (an employee's own view is scoped
+// server-side, and availability blocks in particular need no permission at
+// all — blocking off one's own time is core to being an employee);
+// customers, schedules, and services additionally require the matching
+// permission.
 const NAV_ITEMS: NavItem[] = [
   {
     href: "/admin/appointments",
@@ -52,19 +66,23 @@ const NAV_ITEMS: NavItem[] = [
     href: "/admin/services",
     labelKey: "services",
     icon: ListChecks,
-    adminOnly: true,
+    permission: "manage_services",
   },
   {
     href: "/admin/schedules",
     labelKey: "schedules",
     icon: Clock,
-    adminOnly: true,
+    permission: "manage_schedule",
   },
   {
     href: "/admin/availability",
     labelKey: "availability",
     icon: CalendarOff,
-    adminOnly: true,
+  },
+  {
+    href: "/admin/recurring-appointments",
+    labelKey: "recurringAppointments",
+    icon: Repeat,
   },
   {
     href: "/admin/customers",
@@ -73,6 +91,12 @@ const NAV_ITEMS: NavItem[] = [
     permission: "view_customers",
   },
   { href: "/admin/history", labelKey: "history", icon: History },
+  {
+    href: "/admin/audit-logs",
+    labelKey: "auditLog",
+    icon: ScrollText,
+    adminOnly: true,
+  },
 ];
 
 function isVisible(item: NavItem, session: Session): boolean {

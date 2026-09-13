@@ -29,7 +29,7 @@ Set `NEXT_PUBLIC_API_URL` in `.env.local` to a running `mi-agenda-api` instance 
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3001](http://localhost:3001). `mi-agenda-api` defaults to port 3000, so this app runs on 3001 to avoid colliding with it when both run locally at once.
 
 ## Linting and formatting
 

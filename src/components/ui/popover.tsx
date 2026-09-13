@@ -26,6 +26,7 @@ function PopoverContent({
         side={side}
         align={align}
         sideOffset={sideOffset}
+        className="z-50"
       >
         <PopoverPrimitive.Popup
           data-slot="popover-content"

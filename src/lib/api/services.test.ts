@@ -7,7 +7,7 @@ vi.mock("@/lib/auth/session", () => ({
 import { authFetch } from "@/lib/auth/session";
 import {
   createService,
-  deactivateService,
+  deleteService,
   listServices,
   updateService,
 } from "./services";
@@ -68,11 +68,11 @@ describe("updateService", () => {
   });
 });
 
-describe("deactivateService", () => {
+describe("deleteService", () => {
   it("sends a DELETE to /services/{id}", async () => {
     vi.mocked(authFetch).mockResolvedValue(undefined);
 
-    await deactivateService("s1");
+    await deleteService("s1");
 
     expect(authFetch).toHaveBeenCalledWith("/services/s1", {
       method: "DELETE",

@@ -1,24 +1,32 @@
 "use client";
 
+import { AlertTriangle } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 
 import { FormField } from "@/components/form-field";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Select } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { ApiError } from "@/lib/api/client";
-import { type Employee, listEmployees } from "@/lib/api/employees";
+import { type Employee, getCurrentEmployee, listEmployees } from "@/lib/api/employees";
 import {
   createSchedule,
-  deactivateSchedule,
+  deleteSchedule,
   type Schedule,
   listSchedules,
   updateSchedule,
 } from "@/lib/api/schedules";
-import { useSession } from "../session-context";
+import { hasPermission, useSession } from "../session-context";
 import {
   buildCreateScheduleParams,
   buildSchedulePatch,
@@ -27,21 +35,54 @@ import {
   type ScheduleFormErrors,
   type ScheduleFormValues,
   scheduleToFormValues,
+  translateScheduleApiError,
   validateScheduleForm,
 } from "./schedule-form";
 
+/**
+ * Renders a schedule form's submit error: a known cross-schedule
+ * business-rule rejection (overlap, a second lunch break) gets the amber
+ * warning-chip treatment, since it's an expected, actionable rule rather
+ * than a failure; anything else keeps the plain destructive-red text.
+ */
+function ScheduleSubmitError({
+  message,
+  t,
+}: {
+  message: string;
+  t: (key: string) => string;
+}) {
+  const { text, isBusinessRuleError } = translateScheduleApiError(message, t);
+
+  if (!isBusinessRuleError) {
+    return <p className="text-destructive text-sm">{text}</p>;
+  }
+
+  return (
+    <div className="border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40 flex items-start gap-2 rounded-lg border p-3">
+      <AlertTriangle className="text-amber-600 dark:text-amber-500 mt-0.5 size-4 shrink-0" />
+      <p className="text-amber-800 dark:text-amber-200 text-sm">{text}</p>
+    </div>
+  );
+}
+
 export default function SchedulesPage() {
-  const { role } = useSession();
+  const session = useSession();
   const tc = useTranslations("Common");
 
-  if (role !== "admin") {
+  if (!hasPermission(session, "manage_schedule")) {
     return <p className="text-muted-foreground text-sm">{tc("noAccess")}</p>;
   }
 
-  return <ScheduleManagement />;
+  return session.role === "admin" ? (
+    <AdminScheduleManagement />
+  ) : (
+    <OwnScheduleManagement />
+  );
 }
 
-function ScheduleManagement() {
+/** An admin picks which employee's schedule to view/edit, exactly as before. */
+function AdminScheduleManagement() {
   const t = useTranslations("Schedules");
   const [employees, setEmployees] = useState<Employee[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -107,6 +148,42 @@ function ScheduleManagement() {
           employeeId={selectedEmployeeId}
         />
       )}
+    </div>
+  );
+}
+
+/** A permitted employee manages only their own schedule — no picker, since there's nothing to pick between. */
+function OwnScheduleManagement() {
+  const t = useTranslations("Schedules");
+  const [employeeId, setEmployeeId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    getCurrentEmployee()
+      .then((employee) => setEmployeeId(employee.id))
+      .catch((err: unknown) => {
+        setLoadError(
+          err instanceof ApiError ? err.message : t("loadErrorEmployees"),
+        );
+      });
+  }, [t]);
+
+  if (loadError) {
+    return <p className="text-destructive text-sm">{loadError}</p>;
+  }
+
+  if (!employeeId) {
+    return (
+      <div className="flex justify-center p-6">
+        <Spinner className="size-6" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex max-w-lg flex-col gap-6">
+      <h1 className="text-lg font-semibold">{t("title")}</h1>
+      <EmployeeSchedule employeeId={employeeId} />
     </div>
   );
 }
@@ -234,9 +311,27 @@ function CreateScheduleForm({
             onChange={(v) => updateField("endTime", v)}
             error={errors.endTime}
           />
-          {submitError && (
-            <p className="text-destructive text-sm">{submitError}</p>
-          )}
+          <FormField
+            id="schedule-lunch-start"
+            label={t("lunchStart")}
+            type="time"
+            optional
+            optionalLabel={tc("optional")}
+            value={values.lunchStart}
+            onChange={(v) => updateField("lunchStart", v)}
+            error={errors.lunchStart}
+          />
+          <FormField
+            id="schedule-lunch-end"
+            label={t("lunchEnd")}
+            type="time"
+            optional
+            optionalLabel={tc("optional")}
+            value={values.lunchEnd}
+            onChange={(v) => updateField("lunchEnd", v)}
+            error={errors.lunchEnd}
+          />
+          {submitError && <ScheduleSubmitError message={submitError} t={tf} />}
           <Button type="submit" disabled={submitting} className="self-start">
             {submitting && <Spinner />}
             {submitting ? tc("adding") : t("addBlock")}
@@ -306,6 +401,7 @@ function ScheduleRow({
   const [errors, setErrors] = useState<ScheduleFormErrors>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   function updateField(field: keyof ScheduleFormValues, value: string) {
     setValues((v) => ({ ...v, [field]: value }));
@@ -343,15 +439,12 @@ function ScheduleRow({
     }
   }
 
-  async function toggleStatus() {
+  async function performDelete() {
     setBusy(true);
     setError(null);
     try {
-      if (schedule.status === "active") {
-        await deactivateSchedule(schedule.id);
-      } else {
-        await updateSchedule(schedule.id, { status: "active" });
-      }
+      await deleteSchedule(schedule.id);
+      setConfirmDeleteOpen(false);
       onChanged();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : tc("genericError"));
@@ -402,6 +495,26 @@ function ScheduleRow({
               onChange={(v) => updateField("endTime", v)}
               error={errors.endTime}
             />
+            <FormField
+              id={`schedule-${schedule.id}-lunch-start`}
+              label={t("lunchStart")}
+              type="time"
+              optional
+              optionalLabel={tc("optional")}
+              value={values.lunchStart}
+              onChange={(v) => updateField("lunchStart", v)}
+              error={errors.lunchStart}
+            />
+            <FormField
+              id={`schedule-${schedule.id}-lunch-end`}
+              label={t("lunchEnd")}
+              type="time"
+              optional
+              optionalLabel={tc("optional")}
+              value={values.lunchEnd}
+              onChange={(v) => updateField("lunchEnd", v)}
+              error={errors.lunchEnd}
+            />
             <div className="flex items-center gap-2">
               <Button size="sm" onClick={save} disabled={busy}>
                 {tc("save")}
@@ -419,15 +532,20 @@ function ScheduleRow({
           </div>
         ) : (
           <div className="flex items-center justify-between gap-3">
-            <p className="text-sm">
-              {schedule.start_time} – {schedule.end_time}
-            </p>
+            <div>
+              <p className="text-sm">
+                {schedule.start_time} – {schedule.end_time}
+              </p>
+              {schedule.lunch_start && schedule.lunch_end && (
+                <p className="text-muted-foreground text-xs">
+                  {t("lunchLabel", {
+                    start: schedule.lunch_start,
+                    end: schedule.lunch_end,
+                  })}
+                </p>
+              )}
+            </div>
             <div className="flex shrink-0 items-center gap-2">
-              <Badge
-                variant={schedule.status === "active" ? "secondary" : "outline"}
-              >
-                {schedule.status === "active" ? tc("active") : tc("inactive")}
-              </Badge>
               <Button
                 type="button"
                 variant="outline"
@@ -441,18 +559,45 @@ function ScheduleRow({
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={toggleStatus}
+                onClick={() => setConfirmDeleteOpen(true)}
                 disabled={busy}
+                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
               >
-                {schedule.status === "active"
-                  ? tc("deactivate")
-                  : tc("reactivate")}
+                {tc("delete")}
               </Button>
             </div>
           </div>
         )}
-        {error && <p className="text-destructive text-xs">{error}</p>}
+        {error && <ScheduleSubmitError message={error} t={tf} />}
       </CardContent>
+      {confirmDeleteOpen && (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open && !busy) setConfirmDeleteOpen(false);
+          }}
+        >
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle>{t("deleteConfirmTitle")}</DialogTitle>
+              <DialogDescription>{t("deleteConfirmBody")}</DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setConfirmDeleteOpen(false)}
+                disabled={busy}
+              >
+                {tc("cancel")}
+              </Button>
+              <Button variant="destructive" onClick={performDelete} disabled={busy}>
+                {busy && <Spinner />}
+                {tc("delete")}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </Card>
   );
 }

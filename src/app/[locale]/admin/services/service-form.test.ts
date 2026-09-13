@@ -14,9 +14,9 @@ const service: Service = {
   description: "A classic cut",
   duration_minutes: 30,
   price: 25,
-  status: "active",
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
+  employee_ids: [],
 };
 
 describe("serviceToFormValues", () => {

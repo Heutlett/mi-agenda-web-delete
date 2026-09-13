@@ -39,6 +39,23 @@ export function listAvailabilityBlocks(
   });
 }
 
+export interface UpdateAvailabilityBlockParams {
+  start_time: string;
+  end_time: string;
+  reason?: string;
+}
+
+/** PATCH /availability/blocks/{id} — replaces the block's start/end time and reason. Any authenticated role, self-scoped for an employee. */
+export function updateAvailabilityBlock(
+  id: string,
+  params: UpdateAvailabilityBlockParams,
+): Promise<AvailabilityBlock> {
+  return authFetch<AvailabilityBlock>(
+    `/availability/blocks/${encodeURIComponent(id)}`,
+    { method: "PATCH", body: params },
+  );
+}
+
 /** DELETE /availability/blocks/{id} — permanently removes the block. Requires the admin role. */
 export function deleteAvailabilityBlock(id: string): Promise<void> {
   return authFetch<void>(`/availability/blocks/${encodeURIComponent(id)}`, {

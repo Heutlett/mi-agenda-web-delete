@@ -1,9 +1,12 @@
 "use client";
 
-import { type ReactNode, useEffect, useState } from "react";
+import { useLocale } from "next-intl";
+import { useSearchParams } from "next/navigation";
+import { type ReactNode, Suspense, useEffect, useState } from "react";
 
 import { Spinner } from "@/components/ui/spinner";
-import { usePathname } from "@/i18n/navigation";
+import { usePathname, useRouter } from "@/i18n/navigation";
+import { routing } from "@/i18n/routing";
 import { getMyBusiness, type Business } from "@/lib/api/business";
 import { getCurrentEmployee } from "@/lib/api/employees";
 import { authFetch } from "@/lib/auth/session";
@@ -11,6 +14,36 @@ import { AdminNav } from "./admin-nav";
 import { BusinessSettingsProvider } from "./business-context";
 import { SessionProvider, type Session } from "./session-context";
 import { TopBar } from "./top-bar";
+
+/**
+ * The admin dashboard's language follows the business's own `language`
+ * setting, not each person's browser — see top-bar.tsx's own comment.
+ * Redirects to the matching locale if the current URL isn't already there
+ * (e.g. an employee whose browser negotiated a different default, or an
+ * admin who just changed it). Renders nothing; split out from AuthGuard
+ * only because useSearchParams needs its own Suspense boundary to be
+ * statically prerenderable, and AuthGuard itself is too broad to wrap.
+ */
+function LocaleEnforcer({ business }: { business: Business }) {
+  const locale = useLocale();
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    if (business.language === locale) return;
+    if (!routing.locales.includes(business.language as (typeof routing.locales)[number])) {
+      return;
+    }
+    const query = searchParams.toString();
+    router.replace(
+      { pathname, query: query ? Object.fromEntries(searchParams) : undefined },
+      { locale: business.language },
+    );
+  }, [business.language, locale, pathname, router, searchParams]);
+
+  return null;
+}
 
 // Routes under /admin/* that don't require a session.
 export const PUBLIC_ADMIN_PATHS = [
@@ -109,7 +142,7 @@ export function AuthGuard({
     return (
       <>
         <TopBar session={null} />
-        <main className="flex-1 p-6">{children}</main>
+        <main className="min-h-0 flex-1 overflow-y-auto p-6">{children}</main>
       </>
     );
   }
@@ -118,7 +151,7 @@ export function AuthGuard({
     return (
       <>
         <TopBar session={null} />
-        <main className="flex flex-1 items-center justify-center p-6">
+        <main className="flex min-h-0 flex-1 items-center justify-center p-6">
           <Spinner className="size-6" />
         </main>
       </>
@@ -128,10 +161,15 @@ export function AuthGuard({
   return (
     <SessionProvider session={session}>
       <BusinessSettingsProvider value={{ business, setBusiness }}>
+        <Suspense fallback={null}>
+          <LocaleEnforcer business={business} />
+        </Suspense>
         <TopBar session={session} />
-        <div className="flex flex-1 flex-col md:flex-row">
+        <div className="flex min-h-0 flex-1 flex-col md:flex-row">
           <AdminNav />
-          <main className="min-w-0 flex-1 p-6">{children}</main>
+          <main className="min-h-0 min-w-0 flex-1 overflow-y-auto p-6">
+            {children}
+          </main>
         </div>
         {modal}
       </BusinessSettingsProvider>

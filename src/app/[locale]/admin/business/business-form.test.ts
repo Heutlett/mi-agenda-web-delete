@@ -21,20 +21,20 @@ const original: Business = {
   max_appointments_per_customer_per_week: 7,
   currency_symbol: "₡",
   show_service_prices: true,
+  language: "es",
 };
 
 describe("businessToFormValues", () => {
   it("maps null optional fields to empty strings", () => {
     const business: Business = {
       ...original,
-      phone: null,
       email: null,
       address: null,
     };
     expect(businessToFormValues(business)).toEqual({
       name: "Acme Barbershop",
       slug: "acme-barbershop",
-      phone: "",
+      phone: "555-1234",
       email: "",
       address: "",
       timezone: "America/Costa_Rica",
@@ -42,6 +42,7 @@ describe("businessToFormValues", () => {
       maxAppointmentsPerCustomerPerDay: "3",
       maxAppointmentsPerCustomerPerWeek: "7",
       currencySymbol: "₡",
+      language: "es",
     });
   });
 });
@@ -102,16 +103,19 @@ describe("validateBusinessForm", () => {
     ).toBeDefined();
   });
 
-  it("does not require phone, email, or address", () => {
+  it("does not require email or address", () => {
     const errors = validateBusinessForm({
       ...valid,
-      phone: "",
       email: "",
       address: "",
     });
-    expect(errors.phone).toBeUndefined();
     expect(errors.email).toBeUndefined();
     expect(errors.address).toBeUndefined();
+  });
+
+  it("requires phone", () => {
+    const errors = validateBusinessForm({ ...valid, phone: "" });
+    expect(errors.phone).toBeDefined();
   });
 });
 
@@ -190,11 +194,19 @@ describe("buildBusinessPatch", () => {
     expect(buildBusinessPatch(values, original).currency_symbol).toBeUndefined();
   });
 
+  it("includes a language change", () => {
+    const values = { ...businessToFormValues(original), language: "en" };
+    expect(buildBusinessPatch(values, original)).toEqual({ language: "en" });
+  });
+
   it("picks up a previously-null field being set for the first time", () => {
-    const withoutPhone: Business = { ...original, phone: null };
-    const values = { ...businessToFormValues(withoutPhone), phone: "555-9999" };
-    expect(buildBusinessPatch(values, withoutPhone)).toEqual({
-      phone: "555-9999",
+    const withoutEmail: Business = { ...original, email: null };
+    const values = {
+      ...businessToFormValues(withoutEmail),
+      email: "new@acme.test",
+    };
+    expect(buildBusinessPatch(values, withoutEmail)).toEqual({
+      email: "new@acme.test",
     });
   });
 });

@@ -10,6 +10,7 @@ import {
   MessageCircle,
   Pencil,
   Phone,
+  Repeat,
   Scissors,
   User,
   Wallet,
@@ -38,10 +39,12 @@ import {
   updateAppointment,
 } from "@/lib/api/appointments";
 import { ApiError } from "@/lib/api/client";
+import { notifyAppointmentChanged } from "@/lib/appointment-events";
 import { formatClockTime, formatFullDate, localDateKey, toIntlLocale } from "@/lib/date";
 import { DEFAULT_CURRENCY_SYMBOL, formatDuration, formatPrice } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useBusinessSettings } from "../../business-context";
+import { dayNames } from "../../schedules/schedule-form";
 import { hasPermission, useSession } from "../../session-context";
 import { STATUS_ICON, StatusBadge, statusLabel } from "../appointments-view";
 
@@ -67,6 +70,12 @@ const ALL_STATUSES: AppointmentStatus[] = [
 function isNoChargeStatus(status: AppointmentStatus): boolean {
   return status === "CANCELLED" || status === "MISSED";
 }
+
+// Applied to whichever element currently provides the card-like chrome
+// (the inner Card in page mode, DialogContent itself in modal mode) while
+// there's an unsaved edit, so it's visible either way.
+const UNSAVED_CHANGES_GLOW =
+  "border-amber-400 shadow-[0_0_20px_-4px_rgba(251,191,36,0.6)] ring-2 ring-amber-400/40 ring-offset-2 ring-offset-background dark:border-amber-500";
 
 // Mirrors StatusBadge's own STATUS_VARIANT colors (info/success/destructive/warning): applied to whichever status button is currently active (the appointment's saved status, or a pending selection once one is picked), so it reads as the same color as its badge everywhere else. The other buttons stay plain outline.
 const STATUS_ACTIVE_CLASSES: Record<AppointmentStatus, string> = {
@@ -509,6 +518,7 @@ export function AppointmentDetailContent({ asModal }: { asModal: boolean }) {
             }
           : current,
       );
+      notifyAppointmentChanged();
       setPriceSelection(null);
       setPriceInput("");
       setPaymentStatusSelection(null);
@@ -559,6 +569,14 @@ export function AppointmentDetailContent({ asModal }: { asModal: boolean }) {
       ? ALL_STATUSES.filter((status) => status !== appointment.status)
       : [];
 
+  // In modal mode, DialogContent already provides the card-like chrome
+  // (background, ring, rounded corners), so the inner Card would just
+  // double it up as a redundant nested border. Swapping both to plain
+  // divs there lets DialogContent be the only chrome, while page mode
+  // keeps the real Card exactly as before.
+  const Wrapper = asModal ? "div" : Card;
+  const WrapperContent = asModal ? "div" : CardContent;
+
   const detail = (
     <>
       {error && <p className="text-destructive text-sm">{error}</p>}
@@ -570,14 +588,13 @@ export function AppointmentDetailContent({ asModal }: { asModal: boolean }) {
       )}
 
       {appointment && (
-        <Card
+        <Wrapper
           className={cn(
-            "transition-shadow duration-300",
-            hasUnsavedChanges &&
-              "border-amber-400 shadow-[0_0_20px_-4px_rgba(251,191,36,0.6)] ring-2 ring-amber-400/40 ring-offset-2 ring-offset-background dark:border-amber-500",
+            !asModal && "transition-shadow duration-300",
+            !asModal && hasUnsavedChanges && UNSAVED_CHANGES_GLOW,
           )}
         >
-          <CardContent className="flex flex-col gap-5 text-sm">
+          <WrapperContent className="flex flex-col gap-5 text-sm">
             <div className="flex items-center justify-between gap-2">
               <div>
                 <h1 className="text-lg font-semibold">
@@ -587,6 +604,16 @@ export function AppointmentDetailContent({ asModal }: { asModal: boolean }) {
                   {formatClockTime(appointment.start_time, locale)} –{" "}
                   {formatClockTime(appointment.end_time, locale)}
                 </p>
+                {appointment.recurring_appointment && (
+                  <Badge variant="secondary" className="mt-1.5">
+                    <Repeat />
+                    {t("recurringChip", {
+                      day: dayNames(locale)[appointment.recurring_appointment.day_of_week],
+                      time: appointment.recurring_appointment.start_time,
+                      weeks: appointment.recurring_appointment.interval_weeks,
+                    })}
+                  </Badge>
+                )}
               </div>
               {hasUnsavedChanges && (
                 <Badge variant="warning" className="animate-pulse">
@@ -871,8 +898,8 @@ export function AppointmentDetailContent({ asModal }: { asModal: boolean }) {
             {saveError && (
               <p className="text-destructive text-xs">{saveError}</p>
             )}
-          </CardContent>
-        </Card>
+          </WrapperContent>
+        </Wrapper>
       )}
     </>
   );
@@ -886,7 +913,12 @@ export function AppointmentDetailContent({ asModal }: { asModal: boolean }) {
             if (!open) guardedNavigate(() => router.back());
           }}
         >
-          <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+          <DialogContent
+            className={cn(
+              "max-h-[85vh] overflow-y-auto transition-shadow duration-300 sm:max-w-2xl",
+              hasUnsavedChanges && UNSAVED_CHANGES_GLOW,
+            )}
+          >
             {detail}
           </DialogContent>
         </Dialog>

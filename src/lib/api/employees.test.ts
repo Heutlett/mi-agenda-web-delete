@@ -7,7 +7,7 @@ vi.mock("@/lib/auth/session", () => ({
 import { authFetch } from "@/lib/auth/session";
 import {
   createEmployee,
-  deactivateEmployee,
+  deleteEmployee,
   getCurrentEmployee,
   listEmployees,
   updateEmployee,
@@ -71,22 +71,22 @@ describe("getCurrentEmployee", () => {
 
 describe("updateEmployee", () => {
   it("PATCHes only the given fields", async () => {
-    vi.mocked(authFetch).mockResolvedValue({ id: "e1", status: "inactive" });
+    vi.mocked(authFetch).mockResolvedValue({ id: "e1", name: "New Name" });
 
-    await updateEmployee("e1", { status: "inactive" });
+    await updateEmployee("e1", { name: "New Name" });
 
     expect(authFetch).toHaveBeenCalledWith("/employees/e1", {
       method: "PATCH",
-      body: { status: "inactive" },
+      body: { name: "New Name" },
     });
   });
 });
 
-describe("deactivateEmployee", () => {
+describe("deleteEmployee", () => {
   it("sends a DELETE to /employees/{id}", async () => {
     vi.mocked(authFetch).mockResolvedValue(undefined);
 
-    await deactivateEmployee("e1");
+    await deleteEmployee("e1");
 
     expect(authFetch).toHaveBeenCalledWith("/employees/e1", {
       method: "DELETE",

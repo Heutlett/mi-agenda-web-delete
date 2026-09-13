@@ -5,7 +5,7 @@ export interface Business {
   id: string;
   name: string;
   slug: string;
-  phone: string | null;
+  phone: string;
   email: string | null;
   address: string | null;
   timezone: string;
@@ -18,6 +18,8 @@ export interface Business {
   currency_symbol: string;
   /** Whether customers see any service prices on the public booking page. Business-wide, not per-service. Change via updateBusinessPriceVisibility, not updateBusiness. */
   show_service_prices: boolean;
+  /** The admin dashboard's display language ("es" or "en"), business-wide — every employee's dashboard follows it. Only an admin can change it, via updateBusiness. Defaults to "es" for a new business. */
+  language: string;
 }
 
 export interface PublicService {
@@ -26,11 +28,15 @@ export interface PublicService {
   description: string | null;
   duration_minutes: number;
   price: number | null;
+  /** Which employees are actually bookable for this service. */
+  employee_ids: string[];
 }
 
 export interface PublicEmployee {
   id: string;
   name: string;
+  /** False when this employee has no active working-hours schedule at all — never actually bookable, regardless of service association. */
+  has_schedule: boolean;
 }
 
 export interface PublicBusiness extends Business {
@@ -59,6 +65,8 @@ export interface UpdateBusinessParams {
   max_appointments_per_customer_per_day?: number;
   max_appointments_per_customer_per_week?: number;
   currency_symbol?: string;
+  /** "es" or "en". Admin-only — see Business.language. */
+  language?: string;
 }
 
 /**

@@ -7,15 +7,10 @@ import { FormField } from "@/components/form-field";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
-import {
-  getMyBusiness,
-  type Business,
-  updateBusiness,
-  updateBusinessPriceVisibility,
-} from "@/lib/api/business";
+import { getMyBusiness, type Business, updateBusiness } from "@/lib/api/business";
 import { ApiError } from "@/lib/api/client";
 import { useBusinessSettings } from "../business-context";
-import { hasPermission, useSession } from "../session-context";
+import { useSession } from "../session-context";
 import {
   type BusinessFormErrors,
   type BusinessFormValues,
@@ -25,6 +20,14 @@ import {
 } from "./business-form";
 import { timezoneOptions, withCurrentTimezone } from "./timezones";
 
+// Each language's own native name, the same way LanguageSwitcher labels
+// them — not translated via t(), since a language's name in a picker is
+// conventionally shown in that language itself, not the currently active one.
+const LANGUAGE_OPTIONS = [
+  { value: "es", label: "Español" },
+  { value: "en", label: "English" },
+];
+
 export default function BusinessPage() {
   const { role } = useSession();
 
@@ -32,77 +35,17 @@ export default function BusinessPage() {
 }
 
 /**
- * PATCH /businesses/{id}/price-visibility is a separate endpoint from the
- * general business settings PATCH, specifically so it can be reached by an
- * employee with manage_price_visibility without exposing every other
- * setting to them — so this toggle saves on its own, independent of
- * BusinessSettingsForm's own save button.
- */
-function PriceVisibilityToggle() {
-  const t = useTranslations("Business");
-  const tc = useTranslations("Common");
-  const { business, setBusiness } = useBusinessSettings();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  if (!business) return null;
-
-  async function setShowPrices(next: boolean) {
-    if (!business || next === business.show_service_prices) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const updated = await updateBusinessPriceVisibility(business.id, next);
-      setBusiness(updated);
-    } catch (err) {
-      setError(
-        err instanceof ApiError ? err.message : tc("genericErrorRetry"),
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="text-sm font-medium">{t("showServicePrices")}</span>
-      <p className="text-muted-foreground text-xs">
-        {t("showServicePricesHint")}
-      </p>
-      <div className="flex gap-2">
-        <Button
-          type="button"
-          variant={business.show_service_prices ? "default" : "outline"}
-          size="sm"
-          disabled={busy}
-          onClick={() => setShowPrices(true)}
-        >
-          {t("showServicePricesOn")}
-        </Button>
-        <Button
-          type="button"
-          variant={!business.show_service_prices ? "default" : "outline"}
-          size="sm"
-          disabled={busy}
-          onClick={() => setShowPrices(false)}
-        >
-          {t("showServicePricesOff")}
-        </Button>
-      </div>
-      {error && <p className="text-destructive text-xs">{error}</p>}
-    </div>
-  );
-}
-
-/**
  * An employee can see which business they work for (and its contact
  * info), but only an admin can change it — see business.go's
- * PATCH /businesses/{id}, still admin-only server-side.
+ * PATCH /businesses/{id}, still admin-only server-side. Settings an
+ * employee can be individually granted, like manage_price_visibility, live
+ * on the Profile page instead — not here, since a permission granted to
+ * one employee shouldn't require giving them access to a page that
+ * configures the rest of the business for everyone else.
  */
 function BusinessReadOnlyView() {
   const t = useTranslations("Business");
   const tc = useTranslations("Common");
-  const session = useSession();
   const [business, setBusiness] = useState<Business | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -136,12 +79,10 @@ function BusinessReadOnlyView() {
   return (
     <div className="flex max-w-md flex-col gap-2 text-sm">
       <h1 className="text-lg font-semibold">{business.name}</h1>
-      {business.phone && (
-        <p>
-          <span className="text-muted-foreground">{tc("phone")}: </span>
-          {business.phone}
-        </p>
-      )}
+      <p>
+        <span className="text-muted-foreground">{tc("phone")}: </span>
+        {business.phone}
+      </p>
       {business.email && (
         <p>
           <span className="text-muted-foreground">{tc("email")}: </span>
@@ -153,11 +94,6 @@ function BusinessReadOnlyView() {
           <span className="text-muted-foreground">{tc("address")}: </span>
           {business.address}
         </p>
-      )}
-      {hasPermission(session, "manage_price_visibility") && (
-        <div className="pt-2">
-          <PriceVisibilityToggle />
-        </div>
       )}
     </div>
   );
@@ -278,8 +214,6 @@ function BusinessSettingsForm() {
       <FormField
         id="business-phone"
         label={tc("phone")}
-        optional
-        optionalLabel={tc("optional")}
         value={values.phone}
         onChange={(v) => updateField("phone", v)}
         error={errors.phone}
@@ -348,7 +282,23 @@ function BusinessSettingsForm() {
         error={errors.currencySymbol}
       />
 
-      <PriceVisibilityToggle />
+      <div className="flex flex-col gap-1">
+        <label htmlFor="business-language" className="text-sm font-medium">
+          {t("language")}
+        </label>
+        <p className="text-muted-foreground text-xs">{t("languageHint")}</p>
+        <Select
+          id="business-language"
+          value={values.language}
+          onChange={(event) => updateField("language", event.target.value)}
+        >
+          {LANGUAGE_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </Select>
+      </div>
 
       <div className="flex flex-col gap-1">
         <span className="text-sm font-medium">{tc("status")}</span>

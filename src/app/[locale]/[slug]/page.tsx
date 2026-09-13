@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Mail, MapPin, Phone } from "lucide-react";
+import { ChevronLeft, ChevronRight, Mail, MapPin, Phone, Users } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { notFound } from "next/navigation";
 
@@ -12,7 +12,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Link } from "@/i18n/navigation";
+import { Link, redirect } from "@/i18n/navigation";
+import { routing } from "@/i18n/routing";
 import { getAvailability, type AvailabilitySlot } from "@/lib/api/availability";
 import {
   getBusinessBySlug,
@@ -35,7 +36,7 @@ import {
   weekdayLabels,
 } from "./calendar";
 import { ContactForm } from "./contact-form";
-import { resolveEmployee } from "./resolve-employee";
+import { ANY_EMPLOYEE_ID, resolveEmployee } from "./resolve-employee";
 import { stepUrl } from "./step-url";
 import { TimeSlotPicker } from "./time-slot-picker";
 
@@ -43,7 +44,7 @@ export default async function BusinessBookingPage({
   params,
   searchParams,
 }: PageProps<"/[locale]/[slug]">) {
-  const { slug } = await params;
+  const { slug, locale } = await params;
   const sp = await searchParams;
   const serviceId = typeof sp.service === "string" ? sp.service : undefined;
   const employeeId = typeof sp.employee === "string" ? sp.employee : undefined;
@@ -58,6 +59,27 @@ export default async function BusinessBookingPage({
     }
     throw error;
   });
+
+  // The booking page's language follows the business's own `language`
+  // setting, the same as the admin dashboard (AuthGuard's LocaleEnforcer):
+  // only that business's admin can change it, a customer never can. This
+  // redirect preserves the in-progress booking flow's own query params.
+  if (
+    business.language !== locale &&
+    routing.locales.includes(business.language as (typeof routing.locales)[number])
+  ) {
+    redirect({
+      href: stepUrl(slug, {
+        service: serviceId,
+        employee: employeeId,
+        date: dateParam,
+        month: monthParam,
+        time: timeParam,
+        notice: noticeParam,
+      }),
+      locale: business.language,
+    });
+  }
 
   const selectedService = serviceId
     ? business.services.find((s) => s.id === serviceId)
@@ -76,10 +98,28 @@ export default async function BusinessBookingPage({
     );
   }
 
-  const employee = resolveEmployee(business.employees, employeeId);
+  // Only employees actually associated with the chosen service are
+  // offered here — an employee who doesn't perform this service (e.g. a
+  // different specialization) should never be bookable for it, matching
+  // what the backend itself now enforces at booking time. An employee
+  // with no working-hours schedule at all is excluded the same way: there
+  // would never be a single available date for them, so offering them
+  // just leads to "try a different day" forever with no explanation.
+  const bookableEmployees = business.employees.filter(
+    (e) => selectedService.employee_ids.includes(e.id) && e.has_schedule,
+  );
+  const employee = resolveEmployee(bookableEmployees, employeeId);
 
   if (employee === "none") {
-    return <NoEmployeesStep business={business} />;
+    return business.employees.length === 0 ? (
+      <NoEmployeesStep business={business} />
+    ) : (
+      <NoEmployeesForServiceStep
+        slug={slug}
+        business={business}
+        service={selectedService}
+      />
+    );
   }
 
   if (employee === "pending") {
@@ -88,6 +128,7 @@ export default async function BusinessBookingPage({
         slug={slug}
         business={business}
         service={selectedService}
+        employees={bookableEmployees}
       />
     );
   }
@@ -104,7 +145,7 @@ export default async function BusinessBookingPage({
   // back to this same date-selection step, since a lone employee is always
   // auto-selected regardless of the `employee` param.
   const employeeBackHref =
-    business.employees.length > 1
+    bookableEmployees.length > 1
       ? stepUrl(slug, { service: selectedService.id })
       : stepUrl(slug, {});
 
@@ -122,28 +163,71 @@ export default async function BusinessBookingPage({
     );
   }
 
+  const employeeParam = employee === "all" ? ANY_EMPLOYEE_ID : employee.id;
   const dateBackHref = stepUrl(slug, {
     service: selectedService.id,
-    employee: employee.id,
+    employee: employeeParam,
     month: monthParam,
   });
 
-  const availability = await getAvailability({
-    businessSlug: slug,
-    employeeId: employee.id,
-    serviceId: selectedService.id,
-    date: validDate,
-  }).catch((error: unknown) => {
-    // The employee or service could have been deactivated between an
-    // earlier step and this one; treat that the same as a bad link.
-    if (error instanceof ApiError && error.status === 404) {
-      notFound();
+  // "all" mode: the combined availability of every bookable employee, plus
+  // which of them actually covers each resulting slot — needed below, since
+  // a slot two or more of them share still requires the customer to pick
+  // one, never an automatic assignment.
+  let slots: AvailabilitySlot[];
+  let candidateIdsByStart: Map<string, string[]> | undefined;
+
+  if (employee === "all") {
+    const perEmployee = await Promise.all(
+      bookableEmployees.map((e) =>
+        getAvailability({
+          businessSlug: slug,
+          employeeId: e.id,
+          serviceId: selectedService.id,
+          date: validDate,
+        })
+          .then((result) => ({ employeeId: e.id, slots: result.slots }))
+          .catch((error: unknown) => {
+            if (error instanceof ApiError && error.status === 404) {
+              notFound();
+            }
+            throw error;
+          }),
+      ),
+    );
+
+    const byStart = new Map<string, AvailabilitySlot>();
+    candidateIdsByStart = new Map();
+    for (const { employeeId, slots: employeeSlots } of perEmployee) {
+      for (const slot of employeeSlots) {
+        if (!byStart.has(slot.start_time)) byStart.set(slot.start_time, slot);
+        const ids = candidateIdsByStart.get(slot.start_time) ?? [];
+        ids.push(employeeId);
+        candidateIdsByStart.set(slot.start_time, ids);
+      }
     }
-    throw error;
-  });
+    slots = [...byStart.values()].sort((a, b) =>
+      a.start_time.localeCompare(b.start_time),
+    );
+  } else {
+    const availability = await getAvailability({
+      businessSlug: slug,
+      employeeId: employee.id,
+      serviceId: selectedService.id,
+      date: validDate,
+    }).catch((error: unknown) => {
+      // The employee or service could have been deactivated between an
+      // earlier step and this one; treat that the same as a bad link.
+      if (error instanceof ApiError && error.status === 404) {
+        notFound();
+      }
+      throw error;
+    });
+    slots = availability.slots;
+  }
 
   const selectedSlot = timeParam
-    ? availability.slots.find((s) => s.start_time === timeParam)
+    ? slots.find((s) => s.start_time === timeParam)
     : undefined;
 
   if (!selectedSlot) {
@@ -154,9 +238,40 @@ export default async function BusinessBookingPage({
         service={selectedService}
         employee={employee}
         date={validDate}
-        slots={availability.slots}
+        slots={slots}
         backHref={dateBackHref}
         slotTaken={noticeParam === "slot-taken"}
+      />
+    );
+  }
+
+  if (employee === "all") {
+    const candidateIds = candidateIdsByStart?.get(selectedSlot.start_time) ?? [];
+    const candidates = bookableEmployees.filter((e) => candidateIds.includes(e.id));
+
+    // Only one of them actually has this exact time free — nothing to ask,
+    // so this just becomes the same URL a direct pick of that employee
+    // would have produced.
+    if (candidates.length === 1) {
+      redirect({
+        href: stepUrl(slug, {
+          service: selectedService.id,
+          employee: candidates[0].id,
+          date: validDate,
+          time: selectedSlot.start_time,
+        }),
+        locale,
+      });
+    }
+
+    return (
+      <EmployeeDisambiguationStep
+        slug={slug}
+        business={business}
+        service={selectedService}
+        date={validDate}
+        slot={selectedSlot}
+        candidates={candidates}
       />
     );
   }
@@ -190,12 +305,10 @@ function BusinessHeader({ business }: { business: PublicBusiness }) {
       </div>
       <h1 className="text-xl font-semibold">{business.name}</h1>
       <div className="text-muted-foreground flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-sm">
-        {business.phone && (
-          <span className="inline-flex items-center gap-1">
-            <Phone className="size-3.5" />
-            {business.phone}
-          </span>
-        )}
+        <span className="inline-flex items-center gap-1">
+          <Phone className="size-3.5" />
+          {business.phone}
+        </span>
         {business.email && (
           <span className="inline-flex items-center gap-1">
             <Mail className="size-3.5" />
@@ -301,7 +414,7 @@ function BookingSummary({
   timezone,
 }: {
   service: PublicService;
-  employee?: PublicEmployee;
+  employee?: PublicEmployee | "all";
   date?: string;
   time?: string;
   timezone: string;
@@ -310,7 +423,8 @@ function BookingSummary({
   const locale = toIntlLocale(useLocale());
   const parts = [
     service.name,
-    employee && t("withEmployee", { name: employee.name }),
+    employee &&
+      (employee === "all" ? t("allProfessionals") : t("withEmployee", { name: employee.name })),
     date && formatDate(date, locale),
     time && formatTime(time, timezone, locale),
   ].filter((part): part is string => Boolean(part));
@@ -340,10 +454,12 @@ function EmployeeSelectionStep({
   slug,
   business,
   service,
+  employees,
 }: {
   slug: string;
   business: PublicBusiness;
   service: PublicService;
+  employees: PublicEmployee[];
 }) {
   const t = useTranslations("Booking");
   return (
@@ -357,7 +473,20 @@ function EmployeeSelectionStep({
           {t("chooseEmployee")}
         </h2>
         <div className="flex flex-col gap-3">
-          {business.employees.map((employee) => (
+          <Link
+            href={stepUrl(slug, {
+              service: service.id,
+              employee: ANY_EMPLOYEE_ID,
+            })}
+            className={cn(
+              buttonVariants({ variant: "secondary" }),
+              "justify-start gap-2",
+            )}
+          >
+            <Users className="size-4" />
+            {t("allProfessionals")}
+          </Link>
+          {employees.map((employee) => (
             <Link
               key={employee.id}
               href={stepUrl(slug, {
@@ -390,6 +519,28 @@ function NoEmployeesStep({ business }: { business: PublicBusiness }) {
   );
 }
 
+/** Shown when the business has staff, but none of them are associated with the chosen service — distinct from NoEmployeesStep, which is the whole-business case. */
+function NoEmployeesForServiceStep({
+  slug,
+  business,
+  service,
+}: {
+  slug: string;
+  business: PublicBusiness;
+  service: PublicService;
+}) {
+  const t = useTranslations("Booking");
+  return (
+    <div className="flex flex-col gap-6 p-6">
+      <StepHeader business={business} backHref={stepUrl(slug, {})} />
+      <BookingSummary service={service} timezone={business.timezone} />
+      <p className="text-muted-foreground text-center text-sm">
+        {t("noEmployeesForService")}
+      </p>
+    </div>
+  );
+}
+
 function DateSelectionStep({
   slug,
   business,
@@ -402,7 +553,7 @@ function DateSelectionStep({
   slug: string;
   business: PublicBusiness;
   service: PublicService;
-  employee: PublicEmployee;
+  employee: PublicEmployee | "all";
   backHref: string;
   monthParam: string | undefined;
   today: string;
@@ -418,7 +569,7 @@ function DateSelectionStep({
 
   const dayLinkParams = {
     service: service.id,
-    employee: employee.id,
+    employee: employee === "all" ? ANY_EMPLOYEE_ID : employee.id,
     month: formatMonthParam(current),
   };
 
@@ -523,7 +674,7 @@ function TimeSelectionStep({
   slug: string;
   business: PublicBusiness;
   service: PublicService;
-  employee: PublicEmployee;
+  employee: PublicEmployee | "all";
   date: string;
   slots: AvailabilitySlot[];
   backHref: string;
@@ -557,12 +708,80 @@ function TimeSelectionStep({
           <TimeSlotPicker
             slug={slug}
             serviceId={service.id}
-            employeeId={employee.id}
+            employeeId={employee === "all" ? ANY_EMPLOYEE_ID : employee.id}
             date={date}
             timezone={business.timezone}
             slots={slots}
           />
         )}
+      </section>
+    </div>
+  );
+}
+
+/**
+ * Shown when the customer picked "Todos los profesionales" and the exact
+ * time they chose is covered by more than one of them — the one place in
+ * this flow where a professional still has to be picked explicitly, since
+ * nobody is ever auto-assigned.
+ */
+function EmployeeDisambiguationStep({
+  slug,
+  business,
+  service,
+  date,
+  slot,
+  candidates,
+}: {
+  slug: string;
+  business: PublicBusiness;
+  service: PublicService;
+  date: string;
+  slot: AvailabilitySlot;
+  candidates: PublicEmployee[];
+}) {
+  const t = useTranslations("Booking");
+  return (
+    <div className="flex flex-col gap-6 p-6">
+      <StepHeader
+        business={business}
+        backHref={stepUrl(slug, {
+          service: service.id,
+          employee: ANY_EMPLOYEE_ID,
+          date,
+        })}
+      />
+
+      <BookingSummary
+        service={service}
+        date={date}
+        time={slot.start_time}
+        timezone={business.timezone}
+      />
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-muted-foreground text-sm font-medium">
+          {t("chooseEmployeeForSlot")}
+        </h2>
+        <div className="flex flex-col gap-3">
+          {candidates.map((candidate) => (
+            <Link
+              key={candidate.id}
+              href={stepUrl(slug, {
+                service: service.id,
+                employee: candidate.id,
+                date,
+                time: slot.start_time,
+              })}
+              className={cn(
+                buttonVariants({ variant: "outline" }),
+                "justify-start",
+              )}
+            >
+              {candidate.name}
+            </Link>
+          ))}
+        </div>
       </section>
     </div>
   );

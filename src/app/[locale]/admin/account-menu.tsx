@@ -40,6 +40,12 @@ export function AccountMenu({ session }: { session: Session }) {
       <PopoverContent>
         <div className="p-1">
           <Link
+            href="/admin/profile"
+            className="hover:bg-muted block rounded-lg px-2 py-1.5 text-sm"
+          >
+            {t("profile")}
+          </Link>
+          <Link
             href="/admin/forgot-password"
             className="hover:bg-muted block rounded-lg px-2 py-1.5 text-sm"
           >

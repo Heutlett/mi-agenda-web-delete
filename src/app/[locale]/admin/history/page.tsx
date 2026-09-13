@@ -20,6 +20,7 @@ import {
   listAppointments,
 } from "@/lib/api/appointments";
 import { ApiError } from "@/lib/api/client";
+import { onAppointmentChanged } from "@/lib/appointment-events";
 import { type Employee, listEmployees } from "@/lib/api/employees";
 import { type Service, listServices } from "@/lib/api/services";
 import {
@@ -277,6 +278,16 @@ function HistoryContent({
     null,
   );
   const [error, setError] = useState<string | null>(null);
+  // Bumped by notifyAppointmentChanged(), fired by the appointment detail
+  // modal after a save (a cancellation, most visibly) — that modal is a
+  // sibling route segment layered over this page, so this is the only way
+  // it can tell this list its data is stale.
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(
+    () => onAppointmentChanged(() => setRefreshKey((key) => key + 1)),
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -352,6 +363,7 @@ function HistoryContent({
     employees,
     start,
     end,
+    refreshKey,
     t,
   ]);
 

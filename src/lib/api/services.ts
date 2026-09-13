@@ -7,9 +7,10 @@ export interface Service {
   description: string | null;
   duration_minutes: number;
   price: number;
-  status: "active" | "inactive";
   created_at: string;
   updated_at: string;
+  /** Which employees are associated with (bookable for) this service. Nobody can book it until this has at least one entry. */
+  employee_ids: string[];
 }
 
 export interface CreateServiceParams {
@@ -18,9 +19,11 @@ export interface CreateServiceParams {
   duration_minutes: number;
   /** Decimal string, e.g. "25.00". Required: every service must have a price. */
   price: string;
+  /** Admin-only: ignored for an employee caller, whose new service is always self-associated. */
+  employee_ids?: string[];
 }
 
-/** POST /services — creates a service in the caller's own business. Requires the admin role. */
+/** POST /services — creates a service in the caller's own business. Requires the admin role, or an employee with manage_services. */
 export function createService(params: CreateServiceParams): Promise<Service> {
   return authFetch<Service>("/services", { method: "POST", body: params });
 }
@@ -36,10 +39,11 @@ export interface UpdateServiceParams {
   duration_minutes?: number;
   /** Decimal string, e.g. "25.00". */
   price?: string;
-  status?: "active" | "inactive";
+  /** Replaces the service's entire employee association set. Admin-only — an employee caller must never send this field. */
+  employee_ids?: string[];
 }
 
-/** PATCH /services/{id} — updates only the given fields. Requires the admin role. */
+/** PATCH /services/{id} — updates only the given fields. Requires the admin role, or an employee with manage_services acting on their own service. */
 export function updateService(
   id: string,
   patch: UpdateServiceParams,
@@ -50,8 +54,12 @@ export function updateService(
   });
 }
 
-/** DELETE /services/{id} — deactivates the service (sets status to inactive; does not delete the record). Requires the admin role. */
-export function deactivateService(id: string): Promise<void> {
+/**
+ * DELETE /services/{id} — permanent and one-way: there's no reversible
+ * active/inactive state, the service just disappears from `listServices`
+ * for good and can never be edited again. Requires the admin role.
+ */
+export function deleteService(id: string): Promise<void> {
   return authFetch<void>(`/services/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });

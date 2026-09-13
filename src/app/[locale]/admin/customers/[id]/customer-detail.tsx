@@ -6,6 +6,7 @@ import {
   CalendarDays,
   CheckCheck,
   type LucideIcon,
+  Repeat,
   UserCheck,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
@@ -13,7 +14,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
@@ -34,6 +35,7 @@ import {
   listAppointments,
 } from "@/lib/api/appointments";
 import { ApiError } from "@/lib/api/client";
+import { onAppointmentChanged } from "@/lib/appointment-events";
 import {
   banCustomer,
   type CustomerDetail,
@@ -41,6 +43,7 @@ import {
   unbanCustomer,
 } from "@/lib/api/customers";
 import { formatClockTime, formatDate, localDateKey, toIntlLocale } from "@/lib/date";
+import { cn } from "@/lib/utils";
 import { hasPermission, useSession } from "../../session-context";
 import { StatusBadge, statusLabel } from "../../appointments/appointments-view";
 
@@ -120,6 +123,16 @@ function CustomerHistory({ asModal }: { asModal: boolean }) {
   const [filterServiceId, setFilterServiceId] = useState("");
   const [filterStart, setFilterStart] = useState("");
   const [filterEnd, setFilterEnd] = useState("");
+  // Bumped by notifyAppointmentChanged(), fired by the appointment detail
+  // modal after a save (a cancellation, most visibly) — that modal is a
+  // sibling route segment layered over this page, so this is the only way
+  // it can tell this list its data is stale.
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(
+    () => onAppointmentChanged(() => setRefreshKey((key) => key + 1)),
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -158,7 +171,7 @@ function CustomerHistory({ asModal }: { asModal: boolean }) {
     return () => {
       cancelled = true;
     };
-  }, [id, t]);
+  }, [id, refreshKey, t]);
 
   // The service filter's options come from this customer's own history,
   // not GET /services (admin-only, and would offer services this customer
@@ -264,6 +277,21 @@ function CustomerHistory({ asModal }: { asModal: boolean }) {
               <p className="text-muted-foreground text-sm">
                 {t("bannedNote", { reason: customer.ban_reason })}
               </p>
+            )}
+
+            {!customer.banned_at && (
+              <div className="mt-1 flex flex-col gap-1">
+                <Link
+                  href={`/admin/recurring-appointments?customer_id=${customer.id}&customer_name=${encodeURIComponent(customer.name)}`}
+                  className={cn(
+                    buttonVariants({ variant: "outline", size: "sm" }),
+                    "self-start",
+                  )}
+                >
+                  <Repeat className="size-3.5" />
+                  {t("createRecurringAppointment")}
+                </Link>
+              </div>
             )}
 
             {canBan && (

@@ -11,7 +11,7 @@ export default function AdminLayout({
   modal,
 }: LayoutProps<"/[locale]/admin">) {
   return (
-    <div className="flex min-h-full flex-1 flex-col">
+    <div className="flex h-dvh flex-col overflow-hidden">
       <AuthGuard modal={modal}>{children}</AuthGuard>
     </div>
   );

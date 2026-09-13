@@ -11,13 +11,14 @@ export interface BusinessFormValues {
   maxAppointmentsPerCustomerPerDay: string;
   maxAppointmentsPerCustomerPerWeek: string;
   currencySymbol: string;
+  language: string;
 }
 
 export function businessToFormValues(business: Business): BusinessFormValues {
   return {
     name: business.name,
     slug: business.slug,
-    phone: business.phone ?? "",
+    phone: business.phone,
     email: business.email ?? "",
     address: business.address ?? "",
     timezone: business.timezone,
@@ -29,6 +30,7 @@ export function businessToFormValues(business: Business): BusinessFormValues {
       business.max_appointments_per_customer_per_week,
     ),
     currencySymbol: business.currency_symbol,
+    language: business.language,
   };
 }
 
@@ -44,6 +46,7 @@ const defaultT = (key: string): string =>
     nameRequired: "Name is required.",
     slugRequired: "Slug is required.",
     slugInvalid: "Use lowercase letters, numbers, and single hyphens only.",
+    phoneRequired: "Phone is required.",
     timezoneRequired: "Timezone is required.",
     maxAppointmentsPerDayInvalid: "Enter a whole number of 1 or more.",
     maxAppointmentsPerWeekInvalid: "Enter a whole number of 1 or more.",
@@ -69,6 +72,8 @@ export function validateBusinessForm(
     errors.slug = t("slugInvalid");
   }
 
+  if (!values.phone.trim()) errors.phone = t("phoneRequired");
+
   if (!values.timezone.trim()) errors.timezone = t("timezoneRequired");
 
   if (!isPositiveInteger(values.maxAppointmentsPerCustomerPerDay)) {
@@ -92,10 +97,12 @@ export function validateBusinessForm(
 /**
  * Diffs the form against the originally loaded business and returns only
  * the changed fields, ready to PATCH. Never includes an empty string for
- * phone/email/address: the API has no way to clear those back to null via
- * this endpoint (an empty string is stored literally, not treated as
- * "clear"), so leaving a blanked-out field out of the patch — unchanged on
- * the server — is the only safe behavior until that gap is fixed API-side.
+ * email/address: the API has no way to clear those back to null via this
+ * endpoint (an empty string is stored literally, not treated as "clear"),
+ * so leaving a blanked-out field out of the patch — unchanged on the
+ * server — is the only safe behavior until that gap is fixed API-side.
+ * phone can't be blanked at all — validateBusinessForm already blocks
+ * submitting an empty one, since the API rejects it outright.
  */
 export function buildBusinessPatch(
   values: BusinessFormValues,
@@ -115,7 +122,7 @@ export function buildBusinessPatch(
   if (values.status !== original.status) patch.status = values.status;
 
   const phone = values.phone.trim();
-  if (phone && phone !== (original.phone ?? "")) patch.phone = phone;
+  if (phone && phone !== original.phone) patch.phone = phone;
 
   const email = values.email.trim();
   if (email && email !== (original.email ?? "")) patch.email = email;
@@ -137,6 +144,8 @@ export function buildBusinessPatch(
   if (currencySymbol && currencySymbol !== original.currency_symbol) {
     patch.currency_symbol = currencySymbol;
   }
+
+  if (values.language !== original.language) patch.language = values.language;
 
   return patch;
 }
